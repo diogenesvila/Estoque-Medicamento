@@ -1,3 +1,14 @@
+// ================================
+// APP.JS (COMPLETO) - Indicador ES
+// Importação RBE + AGIR (SheetJS) + Relatório + PIN
+//
+// FIXES:
+// - CSV AGIR: leitura manual (detecta ; ou ,) -> evita “Nenhum item recebido”
+// - AGIR: quantidade = inteiro (trunca decimais tipo 240,00 -> 240)
+// - RBE: pega SOMENTE linha TOTAL (Código + Descrição + Quantidade). Ignora lote/sub-linhas.
+// - Consumo no relatório vem do snapshot (row.consumo) quando existir.
+// ================================
+
 const API_URL =
   "https://script.google.com/macros/s/AKfycbyS6pIwrdEF0N6OA2rxGhX1rYtYqwQlxGMXrs5N1Da4SKNqcjly3vCqv3PiQXR9xAtHFg/exec";
 
@@ -83,7 +94,6 @@ const HAS_REPORT_UI = !!(elList || elTable || $("pieChart") || btnExportCsv || b
 
 // =====================================================
 // PIN (IMPORTAÇÃO) - SOLICITA SEMPRE AO ABRIR importacao.html
-// - O backend (Code.gs) precisa ter acao=validar_pin e validar body.auth
 // =====================================================
 let __IMPORT_PIN__ = "";
 
@@ -93,14 +103,12 @@ function isImportPage_() {
 }
 
 async function ensureImportPinOrRedirect_() {
-  // pede sempre ao entrar na tela de importação
   const pin = prompt("Acesso restrito: informe o PIN de importação:");
   if (!pin) {
     location.href = "index.html";
     return false;
   }
 
-  // valida no backend
   try {
     await apiPost({ acao: "validar_pin", auth: String(pin).trim() }, { skipAutoAuth: true });
   } catch (err) {
@@ -117,11 +125,15 @@ function getImportPin_() {
   return __IMPORT_PIN__ || "";
 }
 
+// =====================
+// Utils
+// =====================
 function nowBR() {
   const d = new Date();
   return new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(d);
 }
 function formatInt(n) { return new Intl.NumberFormat("pt-BR").format(n); }
+
 function normalize(s) {
   return (s || "")
     .toString()
@@ -130,24 +142,98 @@ function normalize(s) {
     .toLowerCase()
     .trim();
 }
+
 function parseNumberBR(value) {
-  if (value === null || value === undefined) return 0;
+  if (value === null || value === undefined) return NaN;
   if (typeof value === "number") return value;
 
   let s = String(value).trim().toLowerCase();
-  if (!s) return 0;
+  if (!s) return NaN;
 
-  const hasMil = s.includes("mil");
-  s = s.replace("mil", "").trim();
   s = s.replace(/\s+/g, "");
+  s = s.replace(/r\$/g, "");
+  s = s.replace(/[^\d,.\-]/g, "");
 
-  if (s.includes(".") && s.includes(",")) s = s.replaceAll(".", "").replaceAll(",", ".");
-  else if (s.includes(",")) s = s.replaceAll(".", "").replaceAll(",", ".");
-  else s = s.replaceAll(",", ".");
+  const lastComma = s.lastIndexOf(",");
+  const lastDot = s.lastIndexOf(".");
+
+  if (lastComma > -1 && lastDot > -1) {
+    if (lastComma > lastDot) {
+      s = s.replaceAll(".", "").replaceAll(",", ".");
+    } else {
+      s = s.replaceAll(",", "");
+    }
+  } else if (lastComma > -1) {
+    s = s.replaceAll(".", "").replaceAll(",", ".");
+  } else {
+    s = s.replaceAll(",", ".");
+  }
 
   const n = Number(s);
-  if (!Number.isFinite(n)) return 0;
-  return hasMil ? n * 1000 : n;
+  return Number.isFinite(n) ? n : NaN;
+}
+
+// ✅ AGIR: inteiro “exato” (240,00 -> 240)
+function parseQtyAGIR(val) {
+  const n = parseNumberBR(val);
+  if (!Number.isFinite(n)) return NaN;
+  return Math.trunc(n);
+}
+
+// =====================================================
+// CSV parser manual (detecta delimitador ; ou ,)
+// =====================================================
+function stripBom_(text) {
+  if (!text) return text;
+  return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+}
+
+function detectCsvDelimiter_(line) {
+  const sc = (line.match(/;/g) || []).length;
+  const cc = (line.match(/,/g) || []).length;
+  return sc >= cc ? ";" : ",";
+}
+
+function parseCsvToRows_(text) {
+  text = stripBom_(text);
+  const lines = text.split(/\r\n|\n|\r/).filter(l => l.trim() !== "");
+  if (!lines.length) return [];
+
+  const delim = detectCsvDelimiter_(lines[0]);
+
+  const rows = [];
+  for (const line of lines) {
+    const row = [];
+    let cur = "";
+    let inQuotes = false;
+
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+
+      if (ch === '"') {
+        // escape "" dentro de aspas
+        const next = line[i + 1];
+        if (inQuotes && next === '"') {
+          cur += '"';
+          i++;
+        } else {
+          inQuotes = !inQuotes;
+        }
+        continue;
+      }
+
+      if (ch === delim && !inQuotes) {
+        row.push(cur);
+        cur = "";
+        continue;
+      }
+
+      cur += ch;
+    }
+    row.push(cur);
+    rows.push(row);
+  }
+  return rows;
 }
 
 // ---------- LocalStorage (meta + última visão) ----------
@@ -227,24 +313,26 @@ function setActiveStock(stockKey) {
 unitTabs.forEach((btn) => on(btn, "click", () => setActiveUnit(btn.dataset.unit)));
 stockTabs.forEach((btn) => on(btn, "click", () => setActiveStock(btn.dataset.stock)));
 
-// ---------- SheetJS leitura ----------
+// ---------- Leitura de arquivo ----------
 async function readFirstSheetAsRows(file) {
   const ext = (file.name.split(".").pop() || "").toLowerCase();
 
+  // ✅ CSV: leitura manual (resolve ; e BOM)
   if (ext === "csv") {
     const text = await file.text();
-    const wb = XLSX.read(text, { type: "string" });
-    const sheet = wb.Sheets[wb.SheetNames[0]];
-    return XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+    return parseCsvToRows_(text);
   }
 
+  // XLS/XLSX: SheetJS
   const buf = await file.arrayBuffer();
   const wb = XLSX.read(buf, { type: "array" });
   const sheet = wb.Sheets[wb.SheetNames[0]];
   return XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
 }
 
-// ---------- Parser RBE: codigo/descricao/quantidade ----------
+// =====================================================
+// PARSER RBE (SÓ LINHA TOTAL)
+// =====================================================
 function parseRBE_CodDescQt(rows) {
   const norm = (s) =>
     (s ?? "")
@@ -268,17 +356,18 @@ function parseRBE_CodDescQt(rows) {
   }
   if (headerRowIndex === -1) throw new Error("RBE: cabeçalho não encontrado (Código/Medicamento/Quantidade).");
 
-  const headers = (rows[headerRowIndex] || []).map((h) => (h ?? "").toString().trim());
+  const headers = (rows[headerRowIndex] || []).map((h) => String(h ?? "").trim());
   const hNorm = headers.map(norm);
 
   const idxCod = hNorm.indexOf("codigo") >= 0 ? hNorm.indexOf("codigo") : -1;
+
   const idxDesc =
     hNorm.indexOf("medicamento") >= 0 ? hNorm.indexOf("medicamento")
     : hNorm.indexOf("descricao") >= 0 ? hNorm.indexOf("descricao")
     : hNorm.indexOf("descrição");
 
   let idxQt = -1;
-  const qtCands = ["quantidade", "qtd", "qt", "saldo", "estoque"];
+  const qtCands = ["quantidade", "qtd", "qtd.", "qt", "saldo", "estoque"];
   for (const c of qtCands) {
     const i = hNorm.indexOf(c);
     if (i >= 0) { idxQt = i; break; }
@@ -287,7 +376,6 @@ function parseRBE_CodDescQt(rows) {
   if (idxDesc < 0 || idxQt < 0) throw new Error("RBE: não achei colunas de Descrição/Quantidade.");
 
   const items = [];
-  let current = null;
   const get = (row, idx) => (idx >= 0 ? row[idx] : "");
   const has = (v) => v !== null && v !== undefined && String(v).trim() !== "";
 
@@ -297,31 +385,32 @@ function parseRBE_CodDescQt(rows) {
     const descricao = String(get(r, idxDesc) ?? "").trim();
     const qtRaw = get(r, idxQt);
 
-    const any = [codigo, descricao, qtRaw].some(has);
-    if (!any) continue;
+    if (![codigo, descricao, qtRaw].some(has)) continue;
 
-    const isNew = has(codigo) || has(descricao);
-    if (isNew) {
-      if (current) items.push(current);
-      current = { codigo, descricao, quantidade: qtRaw };
-    } else if (current) {
-      if (has(qtRaw)) current.quantidade = qtRaw;
-    }
+    if (!(has(codigo) && has(descricao))) continue; // só TOTAL
+
+    const qt = Math.round(parseNumberBR(qtRaw));
+    if (!Number.isFinite(qt)) continue;
+
+    items.push({ codigo, descricao, qt, um: "" });
   }
-  if (current) items.push(current);
 
-  return items
-    .filter((it) => it.descricao && String(it.descricao).trim() !== "")
-    .map((it) => ({
-      codigo: it.codigo || "",
-      descricao: it.descricao,
-      qt: Math.round(parseNumberBR(it.quantidade)),
-      um: "",
-    }))
-    .filter((it) => Number.isFinite(it.qt));
+  const map = new Map();
+  for (const it of items) {
+    const key = normalize(it.codigo) + "|" + normalize(it.descricao);
+    const prev = map.get(key);
+    if (!prev) map.set(key, { ...it });
+    else prev.qt += it.qt;
+  }
+
+  return Array.from(map.values());
 }
 
-// ---------- Parser AGIR: csv padrão ----------
+// =====================================================
+// PARSER AGIR (CSV do seu modelo)
+// Cabeçalho esperado (do seu arquivo):
+// "Cód.";"Descrição";"UM";"Estoque";"Qtd. Disponível";"Consumo Médio/Dia"
+// =====================================================
 function parseAGIR_CodDescQt(rows) {
   const norm = (s) =>
     (s ?? "")
@@ -331,57 +420,84 @@ function parseAGIR_CodDescQt(rows) {
       .toLowerCase()
       .trim();
 
-  if (!rows.length) throw new Error("AGIR: arquivo vazio.");
+  if (!rows || !rows.length) throw new Error("AGIR: arquivo vazio.");
 
-  const headers = (rows[0] || []).map((x) => String(x || "").trim());
-  const h = headers.map(norm);
+  // cabeçalho geralmente é linha 1, mas garantimos busca
+  let headerRowIndex = -1;
+  for (let i = 0; i < Math.min(rows.length, 30); i++) {
+    const t = (rows[i] || []).map(norm).join(" | ");
+    if (t.includes("cod") && (t.includes("descricao") || t.includes("descrição")) && t.includes("dispon")) {
+      headerRowIndex = i;
+      break;
+    }
+  }
+  if (headerRowIndex < 0) headerRowIndex = 0;
 
-  const idxCod =
-    h.indexOf("cod.") >= 0 ? h.indexOf("cod.")
-    : h.indexOf("cod") >= 0 ? h.indexOf("cod")
-    : h.indexOf("codigo") >= 0 ? h.indexOf("codigo")
-    : -1;
+  const headers = (rows[headerRowIndex] || []).map(norm);
 
-  const idxDesc =
-    h.indexOf("descricao") >= 0 ? h.indexOf("descricao")
-    : h.indexOf("descrição") >= 0 ? h.indexOf("descrição")
-    : -1;
+  const findIdx = (patterns) => {
+    for (let i = 0; i < headers.length; i++) {
+      const h = headers[i] || "";
+      if (patterns.some((p) => h.includes(p))) return i;
+    }
+    return -1;
+  };
 
-  let idxQt = -1;
-  const candQt = ["qtd. disponivel", "qtd. disponível", "quantidade", "qtd", "qt", "saldo", "estoque"];
-  for (const c of candQt) {
-    const i = h.indexOf(c);
-    if (i >= 0) { idxQt = i; break; }
+  const idxCod = findIdx(["cód", "cod.", "cod", "codigo", "código"]);
+  const idxDesc = findIdx(["descricao", "descrição"]);
+  const idxUM = findIdx(["um", "u.m", "unidade"]);
+  const idxQt = findIdx(["qtd. dispon", "qtd dispon", "qtd", "quantidade", "disponivel", "disponível", "saldo"]);
+
+  if (idxDesc < 0 || idxQt < 0) {
+    throw new Error("AGIR: não consegui identificar as colunas (Descrição / Qtd. Disponível).");
   }
 
-  const idxUM = h.indexOf("um");
-
-  if (idxDesc < 0 || idxQt < 0) throw new Error("AGIR: não achei colunas 'Descrição' e 'Qtd. Disponível/Quantidade'.");
-
   const itens = [];
-  for (let i = 1; i < rows.length; i++) {
+  for (let i = headerRowIndex + 1; i < rows.length; i++) {
     const r = rows[i] || [];
-    const codigo = idxCod >= 0 ? String(r[idxCod] || "").trim() : "";
     const descricao = String(r[idxDesc] || "").trim();
-    const qt = Math.round(parseNumberBR(r[idxQt]));
+    if (!descricao) continue;
+
+    const codigo = idxCod >= 0 ? String(r[idxCod] || "").trim() : "";
     const um = idxUM >= 0 ? String(r[idxUM] || "").trim() : "";
 
-    if (!descricao) continue;
+    // ✅ inteiro exato: "240,00" -> 240
+    const qt = parseQtyAGIR(r[idxQt]);
     if (!Number.isFinite(qt)) continue;
+
+    // ignora totais
+    const dNorm = norm(descricao);
+    if (dNorm === "total" || dNorm.includes("subtotal")) continue;
 
     itens.push({ codigo, descricao, qt, um });
   }
-  return itens;
+
+  // consolida repetidos
+  const map = new Map();
+  for (const it of itens) {
+    const key = normalize(it.codigo) + "|" + normalize(it.descricao) + "|" + normalize(it.um);
+    const prev = map.get(key);
+    if (!prev) map.set(key, { ...it });
+    else prev.qt += it.qt;
+  }
+
+  return Array.from(map.values());
 }
 
-// ---------- API ----------
+// =====================================================
+// API
+// =====================================================
 async function apiPost(payload, opts = {}) {
   const p = { ...(payload || {}) };
 
-  // Anexa auth automaticamente para ações restritas
   if (!opts.skipAutoAuth) {
     const acao = String(p.acao || "").trim();
-    const needsAuth = acao === "importar_rbe" || acao === "importar_agir" || acao === "limpar_rbe" || acao === "limpar_agir";
+    const needsAuth =
+      acao === "importar_rbe" ||
+      acao === "importar_agir" ||
+      acao === "limpar_rbe" ||
+      acao === "limpar_agir";
+
     if (needsAuth) {
       const pin = getImportPin_();
       if (!pin) throw new Error("PIN não informado. Reabra a tela de importação.");
@@ -389,7 +505,6 @@ async function apiPost(payload, opts = {}) {
     }
   }
 
-  // Content-Type text/plain evita preflight (e costuma resolver o "Failed to fetch")
   const resp = await fetch(API_URL, {
     method: "POST",
     headers: { "Content-Type": "text/plain;charset=utf-8" },
@@ -418,7 +533,9 @@ async function apiGetSnapshot() {
   return data;
 }
 
-// ---------- Banco -> cache ----------
+// =====================================================
+// Banco -> cache
+// =====================================================
 function buildViewCacheFromSnapshot() {
   store.viewCache = {
     PA_SAO_PEDRO: { RBE: [], AGIR: [] },
@@ -432,6 +549,7 @@ function buildViewCacheFromSnapshot() {
     const descricao = String(row.descricao || "").trim();
     const um = String(row.um || "").trim();
     const qt = Math.round(parseNumberBR(row.quantidade));
+    const consumo = String(row.consumo || "INTERNO").trim().toUpperCase() || "INTERNO";
 
     if (!descricao || !Number.isFinite(qt)) continue;
     if (origem !== "RBE" && origem !== "AGIR") continue;
@@ -447,12 +565,11 @@ function buildViewCacheFromSnapshot() {
       descricao,
       qt,
       unidadeMedida: um,
-      consumo: "INTERNO",
+      consumo,
       origem,
     });
   }
 
-  // consolida
   for (const unitKey of Object.keys(store.viewCache)) {
     for (const stockKey of ["RBE", "AGIR"]) {
       const rows = store.viewCache[unitKey][stockKey];
@@ -478,7 +595,9 @@ async function refreshSnapshot() {
   buildViewCacheFromSnapshot();
 }
 
-// ---------- Importação ----------
+// =====================================================
+// Importação
+// =====================================================
 async function importRBE(file) {
   const rows = await readFirstSheetAsRows(file);
   const itens = parseRBE_CodDescQt(rows);
@@ -497,6 +616,9 @@ async function importAGIR(file) {
   const rows = await readFirstSheetAsRows(file);
   const itens = parseAGIR_CodDescQt(rows);
 
+  // se ainda vier vazio, avisa com dica direta
+  if (!itens.length) throw new Error("AGIR: não consegui extrair itens. Verifique se o CSV tem colunas Cód./Descrição/UM/Qtd. Disponível.");
+
   await apiPost({
     acao: "importar_agir",
     unidade: UNITS[store.currentUnit],
@@ -511,7 +633,9 @@ function resetSelectionsOnly() {
   state.selectedIds.clear();
 }
 
-// ---------- Relatório ----------
+// =====================================================
+// Relatório
+// =====================================================
 function getViewData() {
   return store.viewCache[store.currentUnit][store.currentStock] || [];
 }
@@ -521,13 +645,17 @@ function getFilteredData() {
   const consumoSel = state.consumoFilter;
 
   let rows = getViewData().filter((r) => {
-    const okText = !q || normalize(r.descricao).includes(q);
+    const okText =
+      !q ||
+      normalize(r.descricao).includes(q) ||
+      normalize(r.codigo).includes(q);
+
     const okSelected = !state.onlySelected || state.selectedIds.has(r.id);
 
     const okConsumo =
       store.currentStock !== "RBE" ||
       consumoSel === "TODOS" ||
-      (r.consumo || "INTERNO") === consumoSel;
+      (String(r.consumo || "INTERNO").toUpperCase() === consumoSel);
 
     return okText && okSelected && okConsumo;
   });
@@ -626,7 +754,7 @@ function renderTable(rows) {
     tdUM.textContent = r.unidadeMedida ? r.unidadeMedida : "—";
 
     const tdCons = document.createElement("td");
-    tdCons.textContent = "Interno";
+    tdCons.textContent = (r.consumo || "INTERNO") === "EXTERNO" ? "Externo" : "Interno";
 
     tr.appendChild(tdIdx);
     tr.appendChild(tdCod);
@@ -641,7 +769,9 @@ function renderTable(rows) {
   if (elRowCount) elRowCount.textContent = rows.length;
 }
 
-// ---------- Chart ----------
+// =====================================================
+// Chart
+// =====================================================
 let pieChart = null;
 
 function buildPieDataset(rows, topN = 10) {
@@ -679,7 +809,9 @@ function renderChart(rows) {
   });
 }
 
-// ---------- Sync UI ----------
+// =====================================================
+// Sync UI
+// =====================================================
 function syncUI() {
   const rows = getFilteredData();
   renderCounters();
@@ -700,7 +832,9 @@ async function syncDataAndUI() {
   syncUI();
 }
 
-// ---------- Export CSV ----------
+// =====================================================
+// Export CSV
+// =====================================================
 function exportCsv(rows) {
   const header = ["Codigo", "Descricao", "Quantidade", "UnidadeMedida", "Consumo", "Origem"];
   const lines = [header.join(";")];
@@ -710,7 +844,7 @@ function exportCsv(rows) {
     const desc = `"${String(r.descricao || "").replaceAll('"', '""')}"`;
     const qt = String(r.qt ?? "");
     const um = `"${String(r.unidadeMedida || "").replaceAll('"', '""')}"`;
-    const cons = `"INTERNO"`;
+    const cons = `"${String((r.consumo || "INTERNO")).replaceAll('"', '""')}"`;
     const origem = `"${String(r.origem || "").replaceAll('"', '""')}"`;
     lines.push([cod, desc, qt, um, cons, origem].join(";"));
   });
@@ -727,7 +861,9 @@ function exportCsv(rows) {
   URL.revokeObjectURL(url);
 }
 
-// ---------- Eventos ----------
+// =====================================================
+// Eventos
+// =====================================================
 on(btnUploadRBE, "click", () => fileRBE && fileRBE.click());
 on(btnUploadAGIR, "click", () => fileAGIR && fileAGIR.click());
 
@@ -793,11 +929,12 @@ on(btnResetFilters, "click", () => {
 
 on(btnExportCsv, "click", () => exportCsv(getFilteredData()));
 
-// ---------- Init ----------
+// =====================================================
+// Init
+// =====================================================
 (async function init() {
   loadLocal();
 
-  // ✅ Se for a página de importação, pede PIN SEMPRE
   if (isImportPage_() && HAS_IMPORT_UI) {
     const ok = await ensureImportPinOrRedirect_();
     if (!ok) return;
@@ -819,4 +956,3 @@ on(btnExportCsv, "click", () => exportCsv(getFilteredData()));
 
   syncUI();
 })();
-
