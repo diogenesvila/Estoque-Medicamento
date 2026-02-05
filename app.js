@@ -1,13 +1,3 @@
-// ================================
-// APP.JS (COMPLETO) - Indicador ES
-// Importação RBE + AGIR (SheetJS) + Relatório + PIN
-//
-// FIXES (CONSUMO):
-// - Consumo agora é TEXTO LIVRE (não força EXTERNO/INTERNO).
-// - Se vier vazio do snapshot => "INTERNO" (padrão).
-// - Filtro "EXTERNO/INTERNO" funciona por "contém" (ex: "TRATAMENTO EXTERNO" conta como EXTERNO).
-// - Tabela mostra o texto exatamente como está (ou "INTERNO" se vazio).
-// ================================ :contentReference[oaicite:0]{index=0}
 
 const API_URL =
   "https://script.google.com/macros/s/AKfycbyS6pIwrdEF0N6OA2rxGhX1rYtYqwQlxGMXrs5N1Da4SKNqcjly3vCqv3PiQXR9xAtHFg/exec";
