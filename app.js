@@ -2,12 +2,12 @@
 // APP.JS (COMPLETO) - Indicador ES
 // Importação RBE + AGIR (SheetJS) + Relatório + PIN
 //
-// FIXES:
-// - CSV AGIR: leitura manual (detecta ; ou ,) -> evita “Nenhum item recebido”
-// - AGIR: quantidade = inteiro (trunca decimais tipo 240,00 -> 240)
-// - RBE: pega SOMENTE linha TOTAL (Código + Descrição + Quantidade). Ignora lote/sub-linhas.
-// - Consumo no relatório vem do snapshot (row.consumo) quando existir.
-// ================================
+// FIXES (CONSUMO):
+// - Consumo agora é TEXTO LIVRE (não força EXTERNO/INTERNO).
+// - Se vier vazio do snapshot => "INTERNO" (padrão).
+// - Filtro "EXTERNO/INTERNO" funciona por "contém" (ex: "TRATAMENTO EXTERNO" conta como EXTERNO).
+// - Tabela mostra o texto exatamente como está (ou "INTERNO" se vazio).
+// ================================ :contentReference[oaicite:0]{index=0}
 
 const API_URL =
   "https://script.google.com/macros/s/AKfycbyS6pIwrdEF0N6OA2rxGhX1rYtYqwQlxGMXrs5N1Da4SKNqcjly3vCqv3PiQXR9xAtHFg/exec";
@@ -211,7 +211,6 @@ function parseCsvToRows_(text) {
       const ch = line[i];
 
       if (ch === '"') {
-        // escape "" dentro de aspas
         const next = line[i + 1];
         if (inQuotes && next === '"') {
           cur += '"';
@@ -317,13 +316,11 @@ stockTabs.forEach((btn) => on(btn, "click", () => setActiveStock(btn.dataset.sto
 async function readFirstSheetAsRows(file) {
   const ext = (file.name.split(".").pop() || "").toLowerCase();
 
-  // ✅ CSV: leitura manual (resolve ; e BOM)
   if (ext === "csv") {
     const text = await file.text();
     return parseCsvToRows_(text);
   }
 
-  // XLS/XLSX: SheetJS
   const buf = await file.arrayBuffer();
   const wb = XLSX.read(buf, { type: "array" });
   const sheet = wb.Sheets[wb.SheetNames[0]];
@@ -387,7 +384,7 @@ function parseRBE_CodDescQt(rows) {
 
     if (![codigo, descricao, qtRaw].some(has)) continue;
 
-    if (!(has(codigo) && has(descricao))) continue; // só TOTAL
+    if (!(has(codigo) && has(descricao))) continue;
 
     const qt = Math.round(parseNumberBR(qtRaw));
     if (!Number.isFinite(qt)) continue;
@@ -408,8 +405,6 @@ function parseRBE_CodDescQt(rows) {
 
 // =====================================================
 // PARSER AGIR (CSV do seu modelo)
-// Cabeçalho esperado (do seu arquivo):
-// "Cód.";"Descrição";"UM";"Estoque";"Qtd. Disponível";"Consumo Médio/Dia"
 // =====================================================
 function parseAGIR_CodDescQt(rows) {
   const norm = (s) =>
@@ -422,7 +417,6 @@ function parseAGIR_CodDescQt(rows) {
 
   if (!rows || !rows.length) throw new Error("AGIR: arquivo vazio.");
 
-  // cabeçalho geralmente é linha 1, mas garantimos busca
   let headerRowIndex = -1;
   for (let i = 0; i < Math.min(rows.length, 30); i++) {
     const t = (rows[i] || []).map(norm).join(" | ");
@@ -461,18 +455,15 @@ function parseAGIR_CodDescQt(rows) {
     const codigo = idxCod >= 0 ? String(r[idxCod] || "").trim() : "";
     const um = idxUM >= 0 ? String(r[idxUM] || "").trim() : "";
 
-    // ✅ inteiro exato: "240,00" -> 240
     const qt = parseQtyAGIR(r[idxQt]);
     if (!Number.isFinite(qt)) continue;
 
-    // ignora totais
     const dNorm = norm(descricao);
     if (dNorm === "total" || dNorm.includes("subtotal")) continue;
 
     itens.push({ codigo, descricao, qt, um });
   }
 
-  // consolida repetidos
   const map = new Map();
   for (const it of itens) {
     const key = normalize(it.codigo) + "|" + normalize(it.descricao) + "|" + normalize(it.um);
@@ -549,7 +540,10 @@ function buildViewCacheFromSnapshot() {
     const descricao = String(row.descricao || "").trim();
     const um = String(row.um || "").trim();
     const qt = Math.round(parseNumberBR(row.quantidade));
-    const consumo = String(row.consumo || "INTERNO").trim().toUpperCase() || "INTERNO";
+
+    // ✅ CONSUMO LIVRE (não força EXTERNO/INTERNO)
+    const consumoRaw = String(row.consumo || "").trim();
+    const consumo = consumoRaw ? consumoRaw : "INTERNO";
 
     if (!descricao || !Number.isFinite(qt)) continue;
     if (origem !== "RBE" && origem !== "AGIR") continue;
@@ -616,7 +610,6 @@ async function importAGIR(file) {
   const rows = await readFirstSheetAsRows(file);
   const itens = parseAGIR_CodDescQt(rows);
 
-  // se ainda vier vazio, avisa com dica direta
   if (!itens.length) throw new Error("AGIR: não consegui extrair itens. Verifique se o CSV tem colunas Cód./Descrição/UM/Qtd. Disponível.");
 
   await apiPost({
@@ -642,7 +635,7 @@ function getViewData() {
 
 function getFilteredData() {
   const q = normalize(state.query);
-  const consumoSel = state.consumoFilter;
+  const consumoSel = state.consumoFilter; // "TODOS" | "INTERNO" | "EXTERNO"
 
   let rows = getViewData().filter((r) => {
     const okText =
@@ -652,10 +645,11 @@ function getFilteredData() {
 
     const okSelected = !state.onlySelected || state.selectedIds.has(r.id);
 
+    // ✅ filtro por "contém" (TRATAMENTO EXTERNO conta como EXTERNO)
     const okConsumo =
       store.currentStock !== "RBE" ||
       consumoSel === "TODOS" ||
-      (String(r.consumo || "INTERNO").toUpperCase() === consumoSel);
+      normalize(r.consumo).includes(normalize(consumoSel));
 
     return okText && okSelected && okConsumo;
   });
@@ -753,8 +747,9 @@ function renderTable(rows) {
     const tdUM = document.createElement("td");
     tdUM.textContent = r.unidadeMedida ? r.unidadeMedida : "—";
 
+    // ✅ mostra texto exato (ou INTERNO)
     const tdCons = document.createElement("td");
-    tdCons.textContent = (r.consumo || "INTERNO") === "EXTERNO" ? "Externo" : "Interno";
+    tdCons.textContent = String(r.consumo || "INTERNO").trim() || "INTERNO";
 
     tr.appendChild(tdIdx);
     tr.appendChild(tdCod);
