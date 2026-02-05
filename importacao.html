@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Importação de Arquivos - Estoques</title>
+  <link rel="stylesheet" href="styles.css" />
+
+  <!-- SheetJS (Excel/CSV) -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+
+<body>
+  <header class="topbar">
+    <div class="topbar__inner">
+      <h1 class="topbar__title">Importação de Arquivos</h1>
+
+      <div class="topbar__actions">
+        <a href="importacao.html" class="btn btn--ghost">Importação</a>
+        <a href="index.html" class="btn btn--ghost">Relatório</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- UNIDADES -->
+    <section class="card">
+      <div class="card__header">
+        <div>
+          <div class="card__title">Unidade</div>
+          <div class="small">Selecione a base que você quer importar.</div>
+        </div>
+      </div>
+
+      <div class="tabs" role="tablist" aria-label="Unidades">
+        <button class="tab is-active" data-unit="PA_SAO_PEDRO" type="button">PA São Pedro</button>
+        <button class="tab" data-unit="PA_PRAIA_SUA" type="button">PA Praia do Suá</button>
+      </div>
+    </section>
+
+    <!-- ESTOQUES + UPLOADS -->
+    <section class="card">
+      <div class="card__header">
+        <div>
+          <div class="card__title">Estoques</div>
+          <div class="small">Cada estoque tem seu upload e seu “Limpar”. A última atualização fica registrada.</div>
+        </div>
+      </div>
+
+      <div class="tabs" role="tablist" aria-label="Estoques">
+        <button class="tab is-active" data-stock="RBE" type="button">Estoque RBE</button>
+        <button class="tab" data-stock="AGIR" type="button">Estoque AGIR</button>
+      </div>
+
+      <!-- PAINEL RBE -->
+      <div class="panel is-active" id="panelRBE">
+        <div class="panel__grid">
+          <div>
+            <div class="controlsRow">
+              <label class="select">
+              </label>
+            </div>
+
+            <div class="uploadRow">
+              <input id="fileRBE" type="file" accept=".xlsx,.xls,.csv" hidden />
+              <button id="btnUploadRBE" class="btn" type="button">Anexar arquivo RBE</button>
+              <button id="btnClearRBE" class="btn btn--danger" type="button">Limpar dados RBE</button>
+            </div>
+
+            <div class="metaBox">
+              <div class="metaLine"><span class="metaLabel">Última atualização:</span> <span id="rbeLastUpdate">—</span></div>
+              <div class="metaLine"><span class="metaLabel">Arquivo:</span> <span id="rbeLastFile">—</span></div>
+              <div class="metaLine"><span class="metaLabel">Itens carregados:</span> <span id="rbeLastCount">0</span></div>
+            </div>
+          </div>
+
+          <div class="hintBox">
+            <div class="hintTitle">Formato esperado (RBE)</div>
+            <div class="small">
+              • Se existir coluna tipo “Consumo/Interno/Externo”, o sistema tenta detectar.<br/>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- PAINEL AGIR -->
+      <div class="panel" id="panelAGIR">
+        <div class="panel__grid">
+          <div>
+            <div class="small"><strong>AGIR</strong> — Importa <strong>Código</strong>, <strong>Descrição</strong>, <strong>Quantidade</strong> e <strong>Unidade de Medida</strong>.</div>
+
+            <div class="uploadRow">
+              <input id="fileAGIR" type="file" accept=".xlsx,.xls,.csv" hidden />
+              <button id="btnUploadAGIR" class="btn" type="button">Anexar arquivo AGIR</button>
+              <button id="btnClearAGIR" class="btn btn--danger" type="button">Limpar dados AGIR</button>
+            </div>
+
+            <div class="metaBox">
+              <div class="metaLine"><span class="metaLabel">Última atualização:</span> <span id="agirLastUpdate">—</span></div>
+              <div class="metaLine"><span class="metaLabel">Arquivo:</span> <span id="agirLastFile">—</span></div>
+              <div class="metaLine"><span class="metaLabel">Itens carregados:</span> <span id="agirLastCount">0</span></div>
+            </div>
+          </div>
+
+          <div class="hintBox">
+            <div class="hintTitle">Formato esperado (AGIR)</div>
+            <div class="small">
+              Cabeçalhos aceitos (variações):<br/>
+              • Código: <strong>Codigo</strong>, <strong>Código</strong>, <strong>Cod</strong>, <strong>SKU</strong><br/>
+              • Descrição: <strong>Descricao</strong>, <strong>Descrição</strong>, <strong>Produto</strong>, <strong>Item</strong><br/>
+              • Quantidade: <strong>Qt</strong>, <strong>Qtd</strong>, <strong>Quantidade</strong>, <strong>Saldo</strong>, <strong>Estoque</strong><br/>
+              • Unidade de Medida: <strong>Unidade de Medida</strong>, <strong>UM</strong>, <strong>Unid. Medida</strong>, <strong>U.M.</strong>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card__header">
+        <div>
+          <div class="card__title">Observação</div>
+          <div class="small">Importação : o arquivo é enviado para servidor.</div>
+        </div>
+      </div>
+      <div style="padding:14px 16px;">
+        <div class="small">
+          Após importar, vá para <strong>Relatório</strong> para visualizar gráfico, lista, tabela e exportar.
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span class="small">Importação : o arquivo é enviado para servidor.</span>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

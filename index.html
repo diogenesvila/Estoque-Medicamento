@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Relatório de Estoques</title>
+  <link rel="stylesheet" href="styles.css" />
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <!-- SheetJS (mantido para compatibilidade do app.js) -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+
+<body>
+  <header class="topbar">
+    <div class="topbar__inner">
+      <h1 class="topbar__title">Relatório de Estoques</h1>
+
+      <div class="topbar__actions">
+        <a href="importacao.html" class="btn btn--ghost">Importação</a>
+        <a href="index.html" class="btn btn--ghost">Relatório</a>
+
+        <button id="btnExportCsv" class="btn btn--ghost" type="button">Exportar CSV (visão atual)</button>
+        <button id="btnResetFilters" class="btn" type="button">Limpar filtros</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+
+    <!-- ✅ NOVO: FILTROS DE VISÃO (UNIDADE + ESTOQUE) -->
+    <section class="card">
+      <div class="card__header">
+        <div>
+          <div class="card__title">Visão do Relatório</div>
+          <div class="small">Selecione a unidade e o estoque que deseja visualizar.</div>
+        </div>
+      </div>
+
+      <!-- UNIDADES -->
+      <div class="tabs" role="tablist" aria-label="Unidades">
+        <button class="tab is-active" data-unit="PA_SAO_PEDRO" type="button">PA São Pedro</button>
+        <button class="tab" data-unit="PA_PRAIA_SUA" type="button">PA Praia do Suá</button>
+      </div>
+
+      <!-- ESTOQUES -->
+      <div class="tabs" role="tablist" aria-label="Estoques">
+        <button class="tab is-active" data-stock="RBE" type="button">Estoque RBE</button>
+        <button class="tab" data-stock="AGIR" type="button">Estoque AGIR</button>
+      </div>
+    </section>
+
+    <!-- RELATÓRIO -->
+    <section class="grid">
+      <aside class="card">
+        <div class="card__header">
+          <div class="card__title">Descrição</div>
+          <div class="pill" id="selectedCount">0 selecionados</div>
+        </div>
+
+        <div class="search">
+          <span class="search__icon">🔎</span>
+          <input id="searchInput" class="search__input" type="text" placeholder="Pesquisar descrição" />
+        </div>
+
+        <!-- FILTRO CONSUMO (aparece só no RBE) -->
+        <div class="controlsRow controlsRow--report" id="consumoFilterWrap">
+          <label class="select">
+            <span class="select__label">Consumo:</span>
+            <select id="consumoFilter">
+              <option value="TODOS" selected>Todos</option>
+              <option value="INTERNO">Somente Interno</option>
+              <option value="EXTERNO">Somente Externo</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="filter__toolbar">
+          <label class="switch">
+            <input id="onlySelected" type="checkbox" />
+            <span class="switch__text">Somente selecionados</span>
+          </label>
+
+          <div class="small">
+            <span>Total em estoque:</span>
+            <strong id="totalStock">0</strong>
+          </div>
+        </div>
+
+        <div id="itemsList" class="list"></div>
+      </aside>
+
+      <section class="card">
+        <div class="card__header">
+          <div class="card__title">Distribuição por item</div>
+          <div class="small" id="viewHint">—</div>
+        </div>
+
+        <div class="chartWrap">
+          <canvas id="pieChart"></canvas>
+        </div>
+
+        <div class="legendHint small">
+          Dica: selecione itens à esquerda para filtrar o gráfico e a tabela.
+        </div>
+      </section>
+    </section>
+
+    <section class="card card--table">
+      <div class="card__header">
+        <div class="card__title">Itens</div>
+
+        <div class="tableTools">
+          <div class="small">Exibindo: <strong id="rowCount">0</strong></div>
+
+          <label class="select">
+            <span class="select__label">Ordenar:</span>
+            <select id="sortSelect">
+              <option value="qt_desc" selected>Quantidade (maior → menor)</option>
+              <option value="qt_asc">Quantidade (menor → maior)</option>
+              <option value="desc_asc">Descrição (A → Z)</option>
+              <option value="desc_desc">Descrição (Z → A)</option>
+            </select>
+          </label>
+        </div>
+      </div>
+
+      <div class="tableWrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th style="width:72px;">#</th>
+              <th style="width:150px;">Código</th>
+              <th>Descrição</th>
+              <th class="right" style="width:140px;">QT.</th>
+              <th style="width:130px;">Unid. Medida</th>
+              <th style="width:140px;">Consumo</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span class="small">Importação local: o arquivo não é enviado para servidor.</span>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
