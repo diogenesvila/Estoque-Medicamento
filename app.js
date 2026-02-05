@@ -819,3 +819,4 @@ on(btnExportCsv, "click", () => exportCsv(getFilteredData()));
 
   syncUI();
 })();
+
