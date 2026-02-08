@@ -24,6 +24,8 @@ const store = {
     PA_SAO_PEDRO: { RBE: [], AGIR: [] },
     PA_PRAIA_SUA: { RBE: [], AGIR: [] },
   },
+
+  // ✅ agora preenchido pelo SERVIDOR (listar_meta)
   meta: {
     PA_SAO_PEDRO: {
       RBE: { lastUpdate: null, lastFile: null, lastCount: 0 },
@@ -229,15 +231,11 @@ function parseCsvToRows_(text) {
   return rows;
 }
 
-// ---------- LocalStorage (meta + última visão) ----------
-const LS_META_KEY = "sigea_meta_v3";
+// ---------- LocalStorage (somente última visão; meta agora vem do servidor) ----------
 const LS_VIEW_KEY = "sigea_view_v3";
 
 function loadLocal() {
   try {
-    const meta = JSON.parse(localStorage.getItem(LS_META_KEY) || "null");
-    if (meta) store.meta = meta;
-
     const view = JSON.parse(localStorage.getItem(LS_VIEW_KEY) || "null");
     // ✅ NÃO restaura unidade automaticamente (obriga selecionar sempre)
     // if (view?.unit) store.currentUnit = view.unit;
@@ -245,23 +243,14 @@ function loadLocal() {
     if (view?.stock) store.currentStock = view.stock;
   } catch (_) {}
 }
+
 function saveLocal() {
   try {
-    localStorage.setItem(LS_META_KEY, JSON.stringify(store.meta));
     localStorage.setItem(LS_VIEW_KEY, JSON.stringify({ unit: store.currentUnit, stock: store.currentStock }));
   } catch (_) {}
 }
 
-function setMeta(stockKey, { fileName, count }) {
-  if (!store.currentUnit || store.currentUnit === "ALL") return; // meta só faz sentido por unidade real
-  const m = store.meta[store.currentUnit][stockKey];
-  m.lastUpdate = nowBR();
-  m.lastFile = fileName || "—";
-  m.lastCount = count || 0;
-  saveLocal();
-  renderMeta();
-}
-
+// ✅ render meta na tela de importação (vem do store.meta, que agora é do servidor)
 function renderMeta() {
   if (!HAS_IMPORT_UI) return;
   if (!store.currentUnit || store.currentUnit === "ALL") return;
@@ -282,7 +271,7 @@ function renderMeta() {
 function setActiveUnit(unitKey) {
   store.currentUnit = unitKey;
   unitTabs.forEach((t) => t.classList.toggle("is-active", t.dataset.unit === unitKey));
-  renderMeta();
+
   resetSelectionsOnly();
   saveLocal();
   syncDataAndUI();
@@ -523,6 +512,39 @@ async function apiGetSnapshot() {
   return data;
 }
 
+// ✅ NOVO: ler meta do servidor
+async function apiGetMeta() {
+  const resp = await fetch(`${API_URL}?acao=listar_meta`, { method: "GET" });
+  const text = await resp.text();
+  let data = null;
+  try { data = JSON.parse(text); } catch (_) {}
+
+  if (!resp.ok) throw new Error(data?.erro || "Erro ao ler meta.");
+  if (!data || data.ok !== true) throw new Error(data?.erro || "Meta inválida.");
+
+  return data.data || {};
+}
+
+// ✅ aplica meta do servidor no store.meta
+function applyMetaServer_(metaServer) {
+  // metaServer: { "PA São Pedro": { RBE:{...}, AGIR:{...} }, "PA Praia do Suá": {...} }
+  for (const unitKey of Object.keys(UNITS)) {
+    const unidadeTxt = UNITS[unitKey];
+    const m = metaServer?.[unidadeTxt] || {};
+
+    const rbe = m?.RBE || {};
+    const agir = m?.AGIR || {};
+
+    store.meta[unitKey].RBE.lastUpdate = rbe.lastUpdate || null;
+    store.meta[unitKey].RBE.lastFile = rbe.lastFile || "—";
+    store.meta[unitKey].RBE.lastCount = Number(rbe.lastCount || 0);
+
+    store.meta[unitKey].AGIR.lastUpdate = agir.lastUpdate || null;
+    store.meta[unitKey].AGIR.lastFile = agir.lastFile || "—";
+    store.meta[unitKey].AGIR.lastCount = Number(agir.lastCount || 0);
+  }
+}
+
 // =====================================================
 // Banco -> cache
 // =====================================================
@@ -560,7 +582,7 @@ function buildViewCacheFromSnapshot() {
       consumo,
       origem,
 
-      // ✅ NOVO: contexto para comparar
+      // ✅ contexto para comparar no modo ALL
       unidade: UNITS[unitKey],
       estoque: STOCKS[origem],
     });
@@ -587,9 +609,13 @@ function buildViewCacheFromSnapshot() {
   }
 }
 
-async function refreshSnapshot() {
-  store.snapshot = await apiGetSnapshot();
+// ✅ NOVO: atualiza snapshot + meta juntos
+async function refreshAll() {
+  const [snap, meta] = await Promise.all([apiGetSnapshot(), apiGetMeta()]);
+  store.snapshot = snap;
+  applyMetaServer_(meta);
   buildViewCacheFromSnapshot();
+  renderMeta(); // atualiza importacao.html quando estiver aberta
 }
 
 // =====================================================
@@ -603,11 +629,11 @@ async function importRBE(file) {
   await apiPost({
     acao: "importar_rbe",
     unidade: UNITS[store.currentUnit],
+    nomeArquivo: file.name, // ✅ NOVO
     itens: itens.map((x) => ({ codigo: x.codigo, descricao: x.descricao, qt: x.qt, um: "" })),
   });
 
-  setMeta("RBE", { fileName: file.name, count: itens.length });
-  await refreshSnapshot();
+  await refreshAll();
 }
 
 async function importAGIR(file) {
@@ -620,11 +646,11 @@ async function importAGIR(file) {
   await apiPost({
     acao: "importar_agir",
     unidade: UNITS[store.currentUnit],
+    nomeArquivo: file.name, // ✅ NOVO
     itens: itens.map((x) => ({ codigo: x.codigo, descricao: x.descricao, qt: x.qt, um: x.um || "" })),
   });
 
-  setMeta("AGIR", { fileName: file.name, count: itens.length });
-  await refreshSnapshot();
+  await refreshAll();
 }
 
 function resetSelectionsOnly() {
@@ -714,7 +740,7 @@ function renderCounters() {
         ? "Todos os Estoques"
         : STOCKS[store.currentStock];
 
-    // Se for unit/stock específico, mostra última atualização
+    // ✅ meta do servidor
     let lastUpdate = "";
     if (store.currentUnit !== "ALL" && store.currentStock !== "ALL") {
       const meta = store.meta?.[store.currentUnit]?.[store.currentStock];
@@ -900,6 +926,7 @@ function syncUI() {
 }
 
 async function syncDataAndUI() {
+  // importacao.html: apenas renderizar meta (quando unidade estiver selecionada)
   if (!HAS_REPORT_UI) { renderMeta(); return; }
 
   if (!store.currentUnit) {
@@ -913,7 +940,16 @@ async function syncDataAndUI() {
     return;
   }
 
-  if (!store.snapshot.length) await refreshSnapshot();
+  // ✅ carrega snapshot+meta do servidor
+  if (!store.snapshot.length) await refreshAll();
+  else {
+    // mesmo com snapshot, atualiza meta do servidor (leve)
+    try {
+      const meta = await apiGetMeta();
+      applyMetaServer_(meta);
+    } catch (_) {}
+  }
+
   syncUI();
 }
 
@@ -1045,6 +1081,12 @@ on(btnExportCsv, "click", () => {
   if (consumoFilterWrap) {
     consumoFilterWrap.style.display = (store.currentStock === "RBE" || store.currentStock === "ALL") ? "block" : "none";
   }
+
+  // ✅ carrega meta do servidor logo no início (para importacao.html mostrar datas)
+  try {
+    const meta = await apiGetMeta();
+    applyMetaServer_(meta);
+  } catch (_) {}
 
   renderMeta();
   syncUI();
