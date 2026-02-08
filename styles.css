@@ -448,3 +448,34 @@ body{
   color: var(--muted);
   text-align:center;
 }
+
+@media (max-width: 820px){
+  .page-report .topbar__inner{
+    position: relative;
+    gap: 10px;
+  }
+
+  .page-report .topbar__brand{
+    max-width: calc(100% - 60px);
+    min-width: 0;
+  }
+
+  .page-report .topbar__title{
+    white-space: normal;
+    line-height: 1.15;
+    font-size: 16px;
+  }
+
+  .page-report .hamburger{
+    position: absolute;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    margin-left: 0;
+  }
+
+  .page-report .mobileMenu{
+    right: 0;
+    top: 58px;
+  }
+}
