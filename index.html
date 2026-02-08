@@ -1,5 +1,6 @@
 <!doctype html>
 <html lang="pt-BR">
+
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -13,10 +14,21 @@
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 
-<body>
+<body class="page-report">
   <header class="topbar">
     <div class="topbar__inner">
-      <h1 class="topbar__title">Relatório de Estoques</h1>
+
+      <div class="topbar__brand">
+        <div class="topbar__logos" aria-label="Logos">
+          <img class="logo-agir" src="assets/LOGO INICIO AGIR.png" alt="Logo AGIR" />
+
+          <span class="logo-divider"></span>
+
+          <img class="logo-pa" src="assets/LOGO INICIO PA.png" alt="Logo Pronto Atendimento" />
+        </div>
+
+        <h1 class="topbar__title">Relatório de Medicamentos</h1>
+      </div>
 
       <div class="topbar__actions">
         <a href="importacao.html" class="btn btn--ghost">Importação</a>
@@ -25,29 +37,44 @@
         <button id="btnExportCsv" class="btn btn--ghost" type="button">Exportar CSV (visão atual)</button>
         <button id="btnResetFilters" class="btn" type="button">Limpar filtros</button>
       </div>
+
+      <!-- Menu mobile (apenas celular) -->
+      <button class="hamburger" id="hamburger" type="button" aria-label="Menu" aria-expanded="false">
+        <span></span><span></span><span></span>
+      </button>
+
+      <div class="mobileMenu" id="mobileMenu" aria-label="Menu mobile">
+        <a class="mobileMenu__item" href="importacao.html">Importação</a>
+        <a class="mobileMenu__item" href="index.html">Relatório</a>
+        <button class="mobileMenu__item" id="mExportCsv" type="button">Exportar CSV (visão atual)</button>
+        <button class="mobileMenu__item mobileMenu__danger" id="mResetFilters" type="button">Limpar filtros</button>
+      </div>
+
     </div>
   </header>
 
   <main class="container">
 
-    <!-- ✅ NOVO: FILTROS DE VISÃO (UNIDADE + ESTOQUE) -->
+    <!-- ✅ FILTROS DE VISÃO (UNIDADE + ESTOQUE) -->
     <section class="card">
       <div class="card__header">
         <div>
           <div class="card__title">Visão do Relatório</div>
-          <div class="small">Selecione a unidade e o estoque que deseja visualizar.</div>
+          <div class="small">Selecione a unidade e o estoque que deseja visualizar (ou “Todos”).</div>
         </div>
       </div>
 
       <!-- UNIDADES -->
       <div class="tabs" role="tablist" aria-label="Unidades">
-        <button class="tab is-active" data-unit="PA_SAO_PEDRO" type="button">PA São Pedro</button>
+        <button class="tab" data-unit="ALL" type="button">Todas</button>
+        <button class="tab" data-unit="PA_SAO_PEDRO" type="button">PA São Pedro</button>
         <button class="tab" data-unit="PA_PRAIA_SUA" type="button">PA Praia do Suá</button>
       </div>
 
       <!-- ESTOQUES -->
       <div class="tabs" role="tablist" aria-label="Estoques">
-        <button class="tab is-active" data-stock="RBE" type="button">Estoque RBE</button>
+        <button class="tab is-active" data-stock="ALL" type="button">Todos</button>
+        <button class="tab" data-stock="RBE" type="button">Estoque RBE</button>
         <button class="tab" data-stock="AGIR" type="button">Estoque AGIR</button>
       </div>
     </section>
@@ -62,10 +89,10 @@
 
         <div class="search">
           <span class="search__icon">🔎</span>
-          <input id="searchInput" class="search__input" type="text" placeholder="Pesquisar descrição" />
+          <input id="searchInput" class="search__input" type="text" placeholder="Pesquisar descrição ou código" />
         </div>
 
-        <!-- FILTRO CONSUMO (aparece só no RBE) -->
+        <!-- FILTRO CONSUMO (aparece no RBE e em TODOS) -->
         <div class="controlsRow controlsRow--report" id="consumoFilterWrap">
           <label class="select">
             <span class="select__label">Consumo:</span>
@@ -134,6 +161,8 @@
               <th style="width:72px;">#</th>
               <th style="width:150px;">Código</th>
               <th>Descrição</th>
+              <th style="width:180px;">Unidade</th>
+              <th style="width:120px;">Estoque</th>
               <th class="right" style="width:140px;">QT.</th>
               <th style="width:130px;">Unid. Medida</th>
               <th style="width:140px;">Consumo</th>
@@ -146,9 +175,12 @@
   </main>
 
   <footer class="footer">
-    <span class="small">Importação local: o arquivo não é enviado para servidor.</span>
+    <div class="footer__text">
+      <span>Sistema de Relatório de Medicamentos</span>
+    </div>
   </footer>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=20260208_all"></script>
 </body>
+
 </html>

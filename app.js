@@ -1,4 +1,3 @@
-
 const API_URL =
   "https://script.google.com/macros/s/AKfycbyS6pIwrdEF0N6OA2rxGhX1rYtYqwQlxGMXrs5N1Da4SKNqcjly3vCqv3PiQXR9xAtHFg/exec";
 
@@ -13,8 +12,13 @@ const STOCKS = {
 };
 
 const store = {
-  currentUnit: "PA_SAO_PEDRO",
-  currentStock: "RBE",
+  // ✅ COMEÇA EM BRANCO (OBRIGA SELECIONAR NO RELATÓRIO)
+  // Pode ser: null | "PA_SAO_PEDRO" | "PA_PRAIA_SUA" | "ALL"
+  currentUnit: null,
+
+  // Pode ser: "RBE" | "AGIR" | "ALL"
+  currentStock: "ALL",
+
   snapshot: [],
   viewCache: {
     PA_SAO_PEDRO: { RBE: [], AGIR: [] },
@@ -235,7 +239,9 @@ function loadLocal() {
     if (meta) store.meta = meta;
 
     const view = JSON.parse(localStorage.getItem(LS_VIEW_KEY) || "null");
-    if (view?.unit) store.currentUnit = view.unit;
+    // ✅ NÃO restaura unidade automaticamente (obriga selecionar sempre)
+    // if (view?.unit) store.currentUnit = view.unit;
+
     if (view?.stock) store.currentStock = view.stock;
   } catch (_) {}
 }
@@ -247,6 +253,7 @@ function saveLocal() {
 }
 
 function setMeta(stockKey, { fileName, count }) {
+  if (!store.currentUnit || store.currentUnit === "ALL") return; // meta só faz sentido por unidade real
   const m = store.meta[store.currentUnit][stockKey];
   m.lastUpdate = nowBR();
   m.lastFile = fileName || "—";
@@ -257,6 +264,7 @@ function setMeta(stockKey, { fileName, count }) {
 
 function renderMeta() {
   if (!HAS_IMPORT_UI) return;
+  if (!store.currentUnit || store.currentUnit === "ALL") return;
 
   const bRBE = store.meta[store.currentUnit].RBE;
   const bAGIR = store.meta[store.currentUnit].AGIR;
@@ -287,8 +295,10 @@ function setActiveStock(stockKey) {
   if (panelRBE) panelRBE.classList.toggle("is-active", stockKey === "RBE");
   if (panelAGIR) panelAGIR.classList.toggle("is-active", stockKey === "AGIR");
 
-  const show = stockKey === "RBE";
+  // ✅ consumo aparece no RBE e em ALL
+  const show = (stockKey === "RBE" || stockKey === "ALL");
   if (consumoFilterWrap) consumoFilterWrap.style.display = show ? "block" : "none";
+
   if (!show && consumoFilter) {
     state.consumoFilter = "TODOS";
     consumoFilter.value = "TODOS";
@@ -373,7 +383,6 @@ function parseRBE_CodDescQt(rows) {
     const qtRaw = get(r, idxQt);
 
     if (![codigo, descricao, qtRaw].some(has)) continue;
-
     if (!(has(codigo) && has(descricao))) continue;
 
     const qt = Math.round(parseNumberBR(qtRaw));
@@ -394,7 +403,7 @@ function parseRBE_CodDescQt(rows) {
 }
 
 // =====================================================
-// PARSER AGIR (CSV do seu modelo)
+// PARSER AGIR
 // =====================================================
 function parseAGIR_CodDescQt(rows) {
   const norm = (s) =>
@@ -531,7 +540,6 @@ function buildViewCacheFromSnapshot() {
     const um = String(row.um || "").trim();
     const qt = Math.round(parseNumberBR(row.quantidade));
 
-    // ✅ CONSUMO LIVRE (não força EXTERNO/INTERNO)
     const consumoRaw = String(row.consumo || "").trim();
     const consumo = consumoRaw ? consumoRaw : "INTERNO";
 
@@ -551,6 +559,10 @@ function buildViewCacheFromSnapshot() {
       unidadeMedida: um,
       consumo,
       origem,
+
+      // ✅ NOVO: contexto para comparar
+      unidade: UNITS[unitKey],
+      estoque: STOCKS[origem],
     });
   }
 
@@ -566,9 +578,10 @@ function buildViewCacheFromSnapshot() {
         else prev.qt += r.qt;
       }
 
+      // ✅ ID único para funcionar no modo ALL
       store.viewCache[unitKey][stockKey] = Array.from(map.values()).map((it, idx) => ({
         ...it,
-        id: idx + 1,
+        id: `${unitKey}|${stockKey}|${idx + 1}`,
       }));
     }
   }
@@ -583,6 +596,7 @@ async function refreshSnapshot() {
 // Importação
 // =====================================================
 async function importRBE(file) {
+  if (!store.currentUnit || store.currentUnit === "ALL") throw new Error("Selecione UMA unidade antes de importar.");
   const rows = await readFirstSheetAsRows(file);
   const itens = parseRBE_CodDescQt(rows);
 
@@ -597,10 +611,11 @@ async function importRBE(file) {
 }
 
 async function importAGIR(file) {
+  if (!store.currentUnit || store.currentUnit === "ALL") throw new Error("Selecione UMA unidade antes de importar.");
   const rows = await readFirstSheetAsRows(file);
   const itens = parseAGIR_CodDescQt(rows);
 
-  if (!itens.length) throw new Error("AGIR: não consegui extrair itens. Verifique se o CSV tem colunas Cód./Descrição/UM/Qtd. Disponível.");
+  if (!itens.length) throw new Error("AGIR: não consegui extrair itens. Verifique as colunas do arquivo.");
 
   await apiPost({
     acao: "importar_agir",
@@ -617,15 +632,34 @@ function resetSelectionsOnly() {
 }
 
 // =====================================================
-// Relatório
+// Relatório (ALL)
 // =====================================================
 function getViewData() {
-  return store.viewCache[store.currentUnit][store.currentStock] || [];
+  if (!store.currentUnit) return [];
+
+  const unitsToUse =
+    store.currentUnit === "ALL"
+      ? ["PA_SAO_PEDRO", "PA_PRAIA_SUA"]
+      : [store.currentUnit];
+
+  const stocksToUse =
+    store.currentStock === "ALL"
+      ? ["RBE", "AGIR"]
+      : [store.currentStock];
+
+  const rows = [];
+  for (const u of unitsToUse) {
+    for (const s of stocksToUse) {
+      const part = store.viewCache?.[u]?.[s] || [];
+      rows.push(...part);
+    }
+  }
+  return rows;
 }
 
 function getFilteredData() {
   const q = normalize(state.query);
-  const consumoSel = state.consumoFilter; // "TODOS" | "INTERNO" | "EXTERNO"
+  const consumoSel = state.consumoFilter;
 
   let rows = getViewData().filter((r) => {
     const okText =
@@ -635,11 +669,13 @@ function getFilteredData() {
 
     const okSelected = !state.onlySelected || state.selectedIds.has(r.id);
 
-    // ✅ filtro por "contém" (TRATAMENTO EXTERNO conta como EXTERNO)
+    // ✅ Consumo só filtra itens RBE (inclusive quando estoque=ALL)
     const okConsumo =
-      store.currentStock !== "RBE" ||
-      consumoSel === "TODOS" ||
-      normalize(r.consumo).includes(normalize(consumoSel));
+      (store.currentStock !== "RBE" && store.currentStock !== "ALL")
+        ? true
+        : (r.origem !== "RBE")
+          ? true
+          : (consumoSel === "TODOS" || normalize(r.consumo).includes(normalize(consumoSel)));
 
     return okText && okSelected && okConsumo;
   });
@@ -661,12 +697,42 @@ function renderCounters() {
 
   if (elTotalStock) elTotalStock.textContent = formatInt(total);
   if (elSelectedCount) elSelectedCount.textContent = `${state.selectedIds.size} selecionados`;
-  if (viewHint) viewHint.textContent = `${UNITS[store.currentUnit]} • ${STOCKS[store.currentStock]}`;
+
+  if (viewHint) {
+    if (!store.currentUnit) {
+      viewHint.textContent = "Selecione uma unidade para visualizar o relatório.";
+      return;
+    }
+
+    const unitLabel =
+      store.currentUnit === "ALL"
+        ? "Todas as Unidades"
+        : UNITS[store.currentUnit];
+
+    const stockLabel =
+      store.currentStock === "ALL"
+        ? "Todos os Estoques"
+        : STOCKS[store.currentStock];
+
+    // Se for unit/stock específico, mostra última atualização
+    let lastUpdate = "";
+    if (store.currentUnit !== "ALL" && store.currentStock !== "ALL") {
+      const meta = store.meta?.[store.currentUnit]?.[store.currentStock];
+      if (meta?.lastUpdate) lastUpdate = ` • Atualizado em ${meta.lastUpdate}`;
+    }
+
+    viewHint.textContent = `${unitLabel} • ${stockLabel}${lastUpdate}`;
+  }
 }
 
 function renderList(rows) {
   if (!elList) return;
   elList.innerHTML = "";
+
+  if (!store.currentUnit) {
+    elList.innerHTML = `<div class="small" style="padding:12px;">Selecione uma unidade acima para carregar os dados.</div>`;
+    return;
+  }
 
   if (!rows.length) {
     const empty = document.createElement("div");
@@ -678,6 +744,8 @@ function renderList(rows) {
     elList.appendChild(empty);
     return;
   }
+
+  const showCtx = (store.currentUnit === "ALL" || store.currentStock === "ALL");
 
   rows.forEach((r) => {
     const wrap = document.createElement("div");
@@ -699,7 +767,10 @@ function renderList(rows) {
     const desc = document.createElement("div");
     desc.className = "item__desc";
     desc.title = r.descricao;
-    desc.textContent = r.descricao;
+
+    desc.textContent = showCtx
+      ? `[${r.unidade || "—"} • ${r.estoque || "—"}] ${r.descricao}`
+      : r.descricao;
 
     left.appendChild(check);
     left.appendChild(desc);
@@ -718,6 +789,11 @@ function renderTable(rows) {
   if (!elTable) return;
   elTable.innerHTML = "";
 
+  if (!store.currentUnit) {
+    if (elRowCount) elRowCount.textContent = "0";
+    return;
+  }
+
   rows.forEach((r, idx) => {
     const tr = document.createElement("tr");
 
@@ -730,6 +806,12 @@ function renderTable(rows) {
     const tdDesc = document.createElement("td");
     tdDesc.textContent = r.descricao;
 
+    const tdUnidade = document.createElement("td");
+    tdUnidade.textContent = r.unidade || "—";
+
+    const tdEstoque = document.createElement("td");
+    tdEstoque.textContent = r.estoque || (r.origem ? STOCKS[r.origem] : "—");
+
     const tdQt = document.createElement("td");
     tdQt.className = "right";
     tdQt.textContent = formatInt(r.qt);
@@ -737,13 +819,14 @@ function renderTable(rows) {
     const tdUM = document.createElement("td");
     tdUM.textContent = r.unidadeMedida ? r.unidadeMedida : "—";
 
-    // ✅ mostra texto exato (ou INTERNO)
     const tdCons = document.createElement("td");
     tdCons.textContent = String(r.consumo || "INTERNO").trim() || "INTERNO";
 
     tr.appendChild(tdIdx);
     tr.appendChild(tdCod);
     tr.appendChild(tdDesc);
+    tr.appendChild(tdUnidade);
+    tr.appendChild(tdEstoque);
     tr.appendChild(tdQt);
     tr.appendChild(tdUM);
     tr.appendChild(tdCons);
@@ -780,6 +863,11 @@ function renderChart(rows) {
   if (!ctx) return;
   if (typeof Chart === "undefined") return;
 
+  if (!store.currentUnit) {
+    if (pieChart) { pieChart.destroy(); pieChart = null; }
+    return;
+  }
+
   const { labels, values } = buildPieDataset(rows, 10);
   if (pieChart) pieChart.destroy();
 
@@ -813,6 +901,18 @@ function syncUI() {
 
 async function syncDataAndUI() {
   if (!HAS_REPORT_UI) { renderMeta(); return; }
+
+  if (!store.currentUnit) {
+    if (viewHint) viewHint.textContent = "Selecione uma unidade para visualizar o relatório.";
+    if (elTotalStock) elTotalStock.textContent = "0";
+    if (elSelectedCount) elSelectedCount.textContent = "0 selecionados";
+    if (elRowCount) elRowCount.textContent = "0";
+    if (elList) elList.innerHTML = `<div class="small" style="padding:12px;">Selecione uma unidade acima para carregar os dados.</div>`;
+    if (elTable) elTable.innerHTML = "";
+    if (pieChart) { try { pieChart.destroy(); } catch(_) {} pieChart = null; }
+    return;
+  }
+
   if (!store.snapshot.length) await refreshSnapshot();
   syncUI();
 }
@@ -821,17 +921,19 @@ async function syncDataAndUI() {
 // Export CSV
 // =====================================================
 function exportCsv(rows) {
-  const header = ["Codigo", "Descricao", "Quantidade", "UnidadeMedida", "Consumo", "Origem"];
+  const header = ["Codigo", "Descricao", "Unidade", "Estoque", "Quantidade", "UnidadeMedida", "Consumo", "Origem"];
   const lines = [header.join(";")];
 
   rows.forEach((r) => {
     const cod = `"${String(r.codigo || "").replaceAll('"', '""')}"`;
     const desc = `"${String(r.descricao || "").replaceAll('"', '""')}"`;
+    const unidade = `"${String(r.unidade || "").replaceAll('"', '""')}"`;
+    const estoque = `"${String(r.estoque || "").replaceAll('"', '""')}"`;
     const qt = String(r.qt ?? "");
     const um = `"${String(r.unidadeMedida || "").replaceAll('"', '""')}"`;
     const cons = `"${String((r.consumo || "INTERNO")).replaceAll('"', '""')}"`;
     const origem = `"${String(r.origem || "").replaceAll('"', '""')}"`;
-    lines.push([cod, desc, qt, um, cons, origem].join(";"));
+    lines.push([cod, desc, unidade, estoque, qt, um, cons, origem].join(";"));
   });
 
   const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
@@ -839,7 +941,7 @@ function exportCsv(rows) {
 
   const a = document.createElement("a");
   a.href = url;
-  a.download = `estoque_${store.currentUnit}_${store.currentStock}.csv`;
+  a.download = `estoque_${store.currentUnit || "SEM_UNIDADE"}_${store.currentStock}.csv`;
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -912,7 +1014,13 @@ on(btnResetFilters, "click", () => {
   syncUI();
 });
 
-on(btnExportCsv, "click", () => exportCsv(getFilteredData()));
+on(btnExportCsv, "click", () => {
+  if (!store.currentUnit) {
+    alert("Selecione uma unidade antes de exportar.");
+    return;
+  }
+  exportCsv(getFilteredData());
+});
 
 // =====================================================
 // Init
@@ -925,19 +1033,65 @@ on(btnExportCsv, "click", () => exportCsv(getFilteredData()));
     if (!ok) return;
   }
 
-  unitTabs.forEach((t) => t.classList.toggle("is-active", t.dataset.unit === store.currentUnit));
+  // ✅ início: nenhuma unidade ativa
+  unitTabs.forEach((t) => t.classList.remove("is-active"));
+
+  // ✅ estoque padrão: ALL
   stockTabs.forEach((t) => t.classList.toggle("is-active", t.dataset.stock === store.currentStock));
 
   if (panelRBE) panelRBE.classList.toggle("is-active", store.currentStock === "RBE");
   if (panelAGIR) panelAGIR.classList.toggle("is-active", store.currentStock === "AGIR");
 
-  if (consumoFilterWrap) consumoFilterWrap.style.display = store.currentStock === "RBE" ? "block" : "none";
-
-  renderMeta();
-
-  if (HAS_REPORT_UI) {
-    await refreshSnapshot();
+  if (consumoFilterWrap) {
+    consumoFilterWrap.style.display = (store.currentStock === "RBE" || store.currentStock === "ALL") ? "block" : "none";
   }
 
+  renderMeta();
   syncUI();
+})();
+
+// =====================
+// MENU MOBILE (somente index.html)
+// =====================
+(function () {
+  if (!document.body.classList.contains("page-report")) return;
+
+  const btn = document.getElementById("hamburger");
+  const menu = document.getElementById("mobileMenu");
+  if (!btn || !menu) return;
+
+  function closeMenu() {
+    menu.classList.remove("is-open");
+    btn.setAttribute("aria-expanded", "false");
+  }
+
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const open = menu.classList.toggle("is-open");
+    btn.setAttribute("aria-expanded", open ? "true" : "false");
+  });
+
+  document.addEventListener("click", (e) => {
+    if (menu.contains(e.target) || btn.contains(e.target)) return;
+    closeMenu();
+  });
+
+  const mExport = document.getElementById("mExportCsv");
+  const mReset  = document.getElementById("mResetFilters");
+  const dExport = document.getElementById("btnExportCsv");
+  const dReset  = document.getElementById("btnResetFilters");
+
+  if (mExport && dExport) {
+    mExport.addEventListener("click", () => {
+      dExport.click();
+      closeMenu();
+    });
+  }
+
+  if (mReset && dReset) {
+    mReset.addEventListener("click", () => {
+      dReset.click();
+      closeMenu();
+    });
+  }
 })();
