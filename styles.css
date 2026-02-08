@@ -1,4 +1,7 @@
 html{ zoom: 0.8; }
+@media (max-width: 820px){
+  html{ zoom: 1; }
+}
 
 :root{
   --blue:#1f82d7;
